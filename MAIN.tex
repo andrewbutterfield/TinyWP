@@ -1,0 +1,48 @@
+\documentclass[11pt,fleqn]{article}
+\usepackage[a4paper, margin=0.5in]{geometry}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{lstlhs}
+\usepackage{tinywp}
+\usepackage{mathpartir}
+\usepackage{epstopdf}
+\allowdisplaybreaks[2]
+\def\includepicture#1{\includegraphics{#1.eps}}
+\usepackage{hyperref}
+
+\parindent=0pt % I hate first line indentation
+\parskip=3pt   % I like a visual white gap between paragraphs
+
+\def\literateStack{\textit{\textsf{literateStack}}}
+\def\litStackVersion{0.0.1.0}
+
+\author{
+Andrew Butterfield
+\\
+{\small \copyright\ 2017--23}
+}
+\title{Tiny Weakest Precondition
+}
+\date{
+\today
+}
+
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\input{Semantics}
+\newpage
+\input{../tiny-wp/src/TinyWP.lhs}
+
+\nocite{*}
+
+\bibliographystyle{alpha}
+\bibliography{tinywp}
+
+\end{document}

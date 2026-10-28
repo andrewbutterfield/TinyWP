@@ -1,0 +1,206 @@
+\section{Semantics}
+
+\subsection{Syntax}
+
+\RLEQNS{
+   x,y &\in& Var     & \say{--- Variables}
+\\ e,f &\in& Expr    & \say{--- Expressions}
+\\ p,q &\in& Prog    & \say{--- Programs}
+\\ &::=& Skip        & \say{--- do nothing}
+\\ & | & x := e      & \say{--- x becomes e}
+\\ & | & p ; q       & \say{--- p, then q}
+\\ & | & p \cond c q & \say{--- p if c, otherwise q}
+\\ & | & c * p       & \say{--- while c do p}
+}
+
+\newpage
+\subsection{Operational}
+
+\subsubsection{Small-Step}
+
+\RLEQNS{
+   (\sigma,p) &\in& Config & \say{--- configuration}
+\\            &\defs&  State \times Prog
+\\ \_ \then \_ &\in& Trans & \say{--- Transition}
+\\            &\defs& Config \times Config
+\\ Op\sem{\_} &:& Prog \fun \power Trans & \say{--- Trans. Relation}
+\\ term &:& Config \fun \Bool & \say{--- termination predicate}
+\\ term(\sigma,p) &\defs& p = Skip
+}
+
+
+\[\mcolour
+\inferrule
+ { }
+ {(\sigma,x:=e) \then (\sigma\override\maplet x {E\sem{e}_\sigma},Skip)}
+ \qquad \say{Assignment}
+\]
+
+\[\mcolour
+\inferrule
+ { }
+ {(\sigma,Skip ; q) \then (\sigma, q)}
+ \qquad \say{Sequence Handover}
+\]
+
+\[\mcolour
+\inferrule
+ { (\sigma,p) \then (\sigma',p') }
+ {(\sigma,p ; q) \then (\sigma', p' ; q)}
+ \qquad \say{Sequence Step}
+\]
+
+\[\mcolour
+\inferrule
+ { E\sem{c}_\sigma = true }
+ {(\sigma,p \cond c q) \then (\sigma, p)}
+ \qquad \say{Condition True}
+\]
+
+\[\mcolour
+\inferrule
+ { E\sem{c}_\sigma = false }
+ {(\sigma,p \cond c q) \then (\sigma, q)}
+ \qquad \say{Condition False}
+\]
+
+\[\mcolour
+\inferrule
+ { E\sem{c}_\sigma = true }
+ {(\sigma,c * p) \then (\sigma, p ; c * p)}
+ \qquad \say{Loop Continue}
+\]
+
+\[\mcolour
+\inferrule
+ { E\sem{c}_\sigma = false }
+ {(\sigma,c * p) \then (\sigma, Skip)}
+ \qquad \say{Loop End}
+\]
+
+
+\subsection{Algebraic}
+
+\RLEQNS{
+   Skip ; p &=& p
+\\ p ; Skip &=& p
+\\ p ; ( q ; r ) &=& ( p ; q ) ; r
+\\ x:=e ; x:=f &=& x := f[e/x]
+\\ p \cond{true} q &=& p
+\\ p \cond{false} q &=& q
+\\ (p \cond c q) ; r &=& (p;r) \cond c (q;r)
+\\ c * p &=& p ; c * p \cond c Skip
+}
+
+\subsection{Denotational}
+
+\subsubsection{``Traditional''}
+
+\RLEQNS{
+   u,v &\in& Val  & \say{--- Values}
+\\ \sigma, \varsigma &\in& State & \say{--- Variable Values}
+\\ &=& Var \pfun Val &\say{--- partial fn. from vars to vals}
+\\ E\sem{\_}_{\_} &:& Expr \fun State \pfun Val &\say{--- Expr evaluation}
+\\ P\sem{\_}_{\_} &:& Prog \fun State \pfun State
+    &\say{--- State Transformer}
+\\ P\sem{Skip}_\sigma &\defs& \sigma
+\\ P\sem{x:=e}_\sigma &\defs& \sigma\override\maplet x {E\sem{e}_\sigma}
+\\ P\sem{p;q}_\sigma &\defs& P\sem{q}_{P\sem{p}_\sigma}
+\\ P\sem{p \cond q}_\sigma
+  &\defs&
+  \left\{
+  \begin{array}{ll}
+     P\sem{p})_\sigma, & E\sem{c}=true
+  \\ P\sem{q})_\sigma, & E\sem{c}=false
+  \end{array}
+  \right.
+\\ P\sem{c * p}_\sigma
+   &\defs&
+   \lfp W @
+\\ && \quad \lambda \sigma @
+       \IF~ E\sem{c}_\sigma
+\\ && \qquad \THEN~ (W \circ \sem{P})_\sigma
+\\ && \qquad \ELSE~ \sigma
+\\
+\\ P\sem{p;q} &=& P\sem{q} \circ P\sem{p}
+}
+
+
+\subsubsection{Unifying Theories of Programming}
+\RLEQNS{
+   V, V' &=& \setof{u,v,w},\setof{u',v',w'} & \say{variables; before, after'}
+\\ M, M' &=& \setof{ok},\setof{ok'} & \say{model: start, stop'}
+\\ A, A' &=& M\cup M', V \cup V'
+\\ A_m &=& ok_m,u_m,v_m,w_m
+\\ p \design q &\defs& ok \land p \implies ok' \land q
+\\ Skip &\defs&  true \design V'=V
+\\ x:=e &\defs&  true \design x' = e \land {V'\less{x}} = {V\less{x}}
+  & x \say{ ranges over } u,v,w
+\\ p;q &\defs& \exists A_m @ p[A_m/A'] \land q[A_m/A]
+\\ p \cond c q &\defs& c \land p \lor \lnot c \land q
+\\ c * p &\defs& \lfp L @ ( p ; L ) \cond c Skip
+}
+
+\newpage
+\subsection{Deductive}
+
+\subsubsection{Hoare Triples}
+
+\[\mcolour
+\inferrule
+ {  }
+ { \{A\} Skip \{A\}}
+\]
+
+\[\mcolour
+\inferrule
+ {  }
+ { \{A[e/x]\} x:= e \{A\}}
+\]
+
+\[\mcolour
+\inferrule
+ { \{A\} p \{B\} \\ \{B\} q \{C\} }
+ { \{A\} p;q \{C\}}
+\]
+
+\[\mcolour
+\inferrule
+ { \{A \land c\} p \{B\}
+   \\
+   \{A \land \lnot c\} q \{B\} }
+ { \{A\} p \cond c q \{B\}}
+\]
+
+\[\mcolour
+\inferrule
+ { \{ I \land c \} p \{ I \} }
+ { \{I\} c * p \{\lnot c \land I\} }
+\]
+
+\[\mcolour
+\inferrule
+ { A_0 \implies A_1
+   \\
+   \{ A_1 \} p \{ B_1 \}
+   \\
+   B_1 \implies B_0
+   }
+ { \{A_0\} p \{B_0\}}
+\]
+
+\subsubsection{Weakest Precondition}
+
+\RLEQNS{
+   C,L,E &\in& Cond & \say{--- Condition (predicate) }
+\\      &\defs& State \fun \Bool
+\\ \WP\_\_ &:& Prog  \fun Cond \fun Cond
+\\ \WP{Skip}C & \defs& C
+\\ \WP{x:=e}C & \defs& C[e/x]
+\\ \WP{p;q}C & \defs& \WP{p}(\WP{q}C)
+\\ \WP{p {\cond b} q} 
+   &\defs& (b \implies \WP{p}C) \land (\lnot b \implies \WP{q}C)
+\\ \WP{c*p}E & \defs& \say{choose } L \say{ such that}
+\\ && L \land \lnot c \implies E
+\\ && L \land c \implies \WP{p}L
+}
