@@ -1,1 +1,1 @@
-# literateStack
+# TinyWP
