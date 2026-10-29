@@ -139,13 +139,12 @@ ppSub w ppt sub
            ++ intercalate "," (map (ppt w) ts) ++ "]"
 
 ppExpr :: Int -> Expr -> String
-ppExpr w expr = renderBox $ map snd $ ppE w expr
-
 -- ppExpr w (B b)      =  if b then "T" else "F"
 -- ppExpr w (I i)      =  show i
 -- ppExpr w (V v)      =  v
 ppExpr w (F f es)   =  ppFun w f es
 ppExpr w (S e sub)  =  ppExpr w e ++ ppSub w ppExpr sub
+ppExpr w expr = renderBox $ map snd $ ppE w expr
 
 ppE :: Int -> Expr -> SizedBox
 ppE _ (B b)  =  [(1,if b then "T" else "F")]
