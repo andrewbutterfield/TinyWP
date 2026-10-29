@@ -141,22 +141,22 @@ ppSub w ppt sub
 ppExpr :: Int -> Expr -> String
 ppExpr w expr = renderBox $ map snd $ ppE w expr
 
-ppExpr w (B b)      =  if b then "T" else "F"
-ppExpr w (I i)      =  show i
-ppExpr w (V v)      =  v
+-- ppExpr w (B b)      =  if b then "T" else "F"
+-- ppExpr w (I i)      =  show i
+-- ppExpr w (V v)      =  v
 ppExpr w (F f es)   =  ppFun w f es
 ppExpr w (S e sub)  =  ppExpr w e ++ ppSub w ppExpr sub
 
 ppE :: Int -> Expr -> SizedBox
-ppE _ (B b) = [(1,if b then "T" else "F")]
+ppE _ (B b)  =  [(1,if b then "T" else "F")]
+ppE _ (I i)  =  [(length s,s)] where s = show i
+ppE _ (V v)  =  [(length v,v)]
 
 ppFun :: Int -> String -> [Expr] -> String
 ppFun w f es  =  f ++ "("++intercalate "," (map (ppExpr w) es)++")"
 
 ppPred :: Int -> Pred -> String
 ppPred w = reverse . strip . reverse . unlines . ppPreds w
-
-
 
 ppPreds :: Int -> Pred -> [String]
 ppPreds w T     = ["T"]
