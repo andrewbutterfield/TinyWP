@@ -90,65 +90,31 @@ wp prog r = P "and" [r,X] -- need time to thinks this through
 \newpage
 \subsection{Pretty-Printing}
 
-\subsubsection{Pretty-Printing Types}
+With pretty-printers we have an object to render, 
+with a maximum width (\texttt{w}) we are allowed to use,
+requiring us to use linebreaks in a pleasing manner.
 
-We look at how we might layout composite things.
-These are:
-\begin{description}
-\item[\texttt{F String [Expr]}]~\newline
-f(e1,..,en)   or   e1 op e2 .. op en
-\item[\texttt{S Expr (Subs Expr)}]~\newline 
-e[e1,..,en/x1,..,xn]
-\item[\texttt{A Expr            }]~\newline 
-see above
-\item[\texttt{P Name [Pred]     }]~\newline 
-p1 pop p2 pop .. pop pn
-\item[\texttt{Q Name Var Pred   }]~\newline 
-quant v @ p
-\item[\texttt{R Pred (Subs Pred)}]~\newline 
-e[p1,..,pn/x1,..,xn]
-\item[\texttt{Prog ::: Prog     }]~\newline 
-p1 ; p2
-\item[\texttt{Var := Expr       }]~\newline 
-v := e
-\item[\texttt{Cond Expr Prog Prog}]~\newline 
-p1 <| e |> p2
-\item[\texttt{Loop Expr Prog     }]~\newline 
-c * p
-\end{description}
 
-We start with the notion of a ``box'',
-which is zero or more strings, each of exactly the same length.
+For rendering, we then introduce the notion of a ``box'',
+which is zero or more strings.
+The idea is that we apply indentation at the box level.
+We also have an intermediate structure 
+where each string is annotated with its length.
 \begin{code}
 type Box = [String]
+type SizedBox = [(Int,String)]
 
-invbox :: Box -> Bool
-invbox [] = True
-invbox box = length (nub $ map length box) == 1
-\end{code}
+sizeBox :: Box -> SizedBox
+sizeBox box = map (\ s -> (length s,s)) box
 
-\subsubsection{Syntax Pretty Printers}
+boxWidth :: Box -> Int
+boxWidth = maximum . map length
 
-\begin{code}
-ppSub :: (t -> String) -> Subs t -> String
-ppSub ppt sub 
-  = let (vs,ts) = unzip sub
-    in "[" ++intercalate "," vs 
-           ++ "/"
-           ++ intercalate "," (map ppt ts) ++ "]"
+indBox :: Int -> Box -> Box
+indBox i box = map ((replicate i ' ')++) box
 
-ppExpr :: Expr -> String
-ppExpr (B b)      =  if b then "T" else "F"
-ppExpr (I i)      =  show i
-ppExpr (V v)      =  v
-ppExpr (F f es)   =  ppFun f es
-ppExpr (S e sub)  =  ppExpr e ++ ppSub ppExpr sub
-
-ppFun :: String -> [Expr] -> String
-ppFun f es  =  f ++ "("++intercalate "," (map ppExpr es)++")"
-
-ppPred :: Pred -> String
-ppPred  = reverse . strip . reverse . unlines . ppPreds
+renderBox :: Box -> String
+renderBox = reverse . strip . reverse . unlines
 
 strip :: String -> String
 -- removes zero or more initial newlines
@@ -156,34 +122,68 @@ strip "" = ""
 strip str@(c:cs)
   | c == '\n'  =  strip cs
   | otherwise  =  str
+\end{code}
+Basically, our pretty-printer converts an object into a large \texttt{Box},
+which they can render. 
+The available width \texttt{w} is used by heuristics to best split the output 
+over multiple lines.
 
-ppPreds :: Pred -> [String]
-ppPreds T     = ["T"]
-ppPreds X     = ["F"]
-ppPreds (A e) = [ppExpr e]
-ppPreds (P p ps) = ppProp p ps
-ppPreds (Q q x p) = [q++" "++x++" @ " ++ ppPred p]
-ppPreds (R p sub) = [ppPred p, ppSub ppPred sub] 
+\subsubsection{Syntax Pretty Printers}
+
+\begin{code}
+ppSub :: Int -> (Int -> t -> String) -> Subs t -> String
+ppSub w ppt sub 
+  = let (vs,ts) = unzip sub
+    in "[" ++intercalate "," vs 
+           ++ "/"
+           ++ intercalate "," (map (ppt w) ts) ++ "]"
+
+ppExpr :: Int -> Expr -> String
+ppExpr w expr = renderBox $ map snd $ ppE w expr
+
+ppExpr w (B b)      =  if b then "T" else "F"
+ppExpr w (I i)      =  show i
+ppExpr w (V v)      =  v
+ppExpr w (F f es)   =  ppFun w f es
+ppExpr w (S e sub)  =  ppExpr w e ++ ppSub w ppExpr sub
+
+ppE :: Int -> Expr -> SizedBox
+ppE _ (B b) = [(1,if b then "T" else "F")]
+
+ppFun :: Int -> String -> [Expr] -> String
+ppFun w f es  =  f ++ "("++intercalate "," (map (ppExpr w) es)++")"
+
+ppPred :: Int -> Pred -> String
+ppPred w = reverse . strip . reverse . unlines . ppPreds w
 
 
-ppProp :: Name -> [Pred] -> [String]
-ppProp p ps = [p++"("++intercalate "," (map ppPred ps)++")"]
+
+ppPreds :: Int -> Pred -> [String]
+ppPreds w T     = ["T"]
+ppPreds w X     = ["F"]
+ppPreds w (A e) = [ppExpr w e]
+ppPreds w (P p ps) = ppProp w p ps
+ppPreds w (Q q x p) = [q++" "++x++" @ " ++ ppPred w p]
+ppPreds w (R p sub) = [ppPred w p, ppSub w ppPred sub] 
+
+ppProp :: Int -> Name -> [Pred] -> [String]
+ppProp w p ps = [p++"("++intercalate "," (map (ppPred w) ps)++")"]
 
 peSub :: Pred -> Subs Expr -> Pred
 peSub p sub =  R p (mapsnd A sub)
 
 mapsnd f [] = [] ; mapsnd f ((x,y):rest) = (x, f y):mapsnd f rest
 
-ppProg :: Prog -> String
-ppProg  =  reverse . strip . reverse . unlines . ppProgs
+ppProg :: Int -> Prog -> String
+ppProg w =  reverse . strip . reverse . unlines . ppProgs w
 
-ppProgs :: Prog -> [String]
-ppProgs U = ["U"]
-ppProgs II = ["II"]
-ppProgs (p ::: q) = ppProgs p ++ [";"] ++ ppProgs q
-ppProgs (v := e) = [ v ++ " := " ++ ppExpr e ]
-ppProgs (Cond e p q) = ppProgs p ++ ["<| "++ppExpr e++" |>"] ++ ppProgs q
-ppProgs (Loop e p) = [ppExpr e ++ " *"] ++ ppProgs p
+ppProgs :: Int -> Prog -> [String]
+ppProgs w U = ["U"]
+ppProgs w II = ["II"]
+ppProgs w (p ::: q) = ppProgs w p ++ [";"] ++ ppProgs w q
+ppProgs w (v := e) = [ v ++ " := " ++ ppExpr w e ]
+ppProgs w (Cond e p q) = ppProgs w p ++ ["<| "++ppExpr w e++" |>"] ++ ppProgs w q
+ppProgs w (Loop e p) = [ppExpr w e ++ " *"] ++ ppProgs w p
 \end{code}
 
 
