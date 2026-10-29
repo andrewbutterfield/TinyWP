@@ -1,0 +1,54 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.38.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           tiny-wp
+version:        0.1.0.0
+description:    Small implemetation of weakest precondition
+author:         Andrew Butterfield
+maintainer:     butrfeld@tcd.ie
+copyright:      2026 Andrew Butterfield
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+library
+  exposed-modules:
+      TinyWP
+  other-modules:
+      Paths_tiny_wp
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+  default-language: Haskell2010
+
+executable tiny-wp
+  main-is: Main.lhs
+  other-modules:
+      Paths_tiny_wp
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , tiny-wp
+  default-language: Haskell2010
+
+test-suite tiny-wp-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_tiny_wp
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , tiny-wp
+  default-language: Haskell2010
