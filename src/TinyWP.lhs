@@ -100,7 +100,15 @@ data SST -- Sized String-Tree
 The code below defines a standard instrumented rendering of an object,
 assuming no width restrictions.
 
+\subsubsection{Expression Pretty-Printing}
 
+Our standard  rendering of an expression produces one of the following forms
+(here the $\oplus$ refer to a repetition of a single infix operator symbol)
+:
+\begin{mathpar}
+  T \and F \and 42 \and v 
+  \and f(e_1,\dots,e_n) \and e_1 \oplus e_2 \oplus \dots \oplus e_n
+\end{mathpar}
 \begin{code}
 expr2SST :: Expr -> SST
 expr2SST(B b)     =  SST 1 (if b then "T" else "F") []
