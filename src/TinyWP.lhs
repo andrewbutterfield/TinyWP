@@ -90,6 +90,25 @@ wp prog r = P "and" [r,X] -- need time to thinks this through
 \newpage
 \subsection{Pretty-Printing}
 
+We need to know sizes of text constructs and how things are logically nested.
+We adopt the following ``sized string-tree'' data-structure to record this.
+\begin{code}
+data SST -- Sized String-Tree
+  = SST Int String [SST]
+  deriving (Show,Read)
+\end{code}
+The code below defines a standard instrumented rendering of an object,
+assuming no width restrictions.
+
+
+\begin{code}
+expr2SST :: Expr -> SST
+expr2SST(B b)     =  SST 1 (if b then "T" else "F") []
+expr2SST(I i)     =  SST (length s) s [] where s = show i
+expr2SST(V v)     =  SST (length v) v []
+expr2SST(F f [])  =  SST (length f+2) (f++"()") []
+\end{code}
+
 With pretty-printers we have an object to render, 
 with a maximum width (\texttt{w}) we are allowed to use,
 requiring us to use linebreaks in a pleasing manner.
