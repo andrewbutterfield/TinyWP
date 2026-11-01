@@ -1,6 +1,6 @@
 \section{Tiny Weakest Precondition}
 \begin{verbatim}
-Copyright  Andrew Buttefield (c) 2026
+Copyright Andrew Buttefield (c) 2026
 
 LICENSE: BSD3, see file LICENSE at tiny-wp root
 \end{verbatim}
@@ -11,6 +11,8 @@ module TinyWP (
 where
 
 import Data.List(intercalate,nub,intersperse)
+import qualified Data.Map as M
+import Data.Map(Map)
 
 iamtinywp :: String
 iamtinywp = "I am TinyWP!"
@@ -110,9 +112,87 @@ onelineSST (SST _ hdr ssts) = hdr ++ (concat $ map onelineSST ssts)
 
 checkSST :: SST -> Int
 checkSST sst@(SST len _ _) = len - length (onelineSST sst)
+
+examine :: SST -> IO ()
+examine sst = putStrLn $ unlines 
+  [ ""
+  , "==="
+  , "Check: " ++ show (checkSST sst)
+  , "OneLine:"
+  , onelineSST sst
+  , "---"
+  , "Expr:"
+  , show sst
+  , "---"
+  ]
 \end{code}
 The code below defines a standard instrumented rendering of an object,
 assuming no width restrictions.
+
+We will also want to know if a function is usually rendered using infix notation.
+We provide a (partial) lookup table mapping function names to fixity information
+(precedence,associativity):
+\begin{code}
+data FunRender 
+  = Prefix  -- standard prefix function  f(e1,...,en)
+  | Unary   -- prefix, with n=1
+  | Binary  -- Infix, with n=2 only
+  | LInfix  -- Left Infix    e op f op g   is  op(op(e,f),g)
+  | RInfix  -- Right Infix    e op f op g   is  op(e,op(f,g))
+  | Infix   -- Fully Infix   e op f op g   is  op(e,f,g)
+  deriving (Eq,Show,Read)
+type Infixes = Map String (Int,FunRender)
+
+assocLkp :: Int -> Infixes -> String -> (Int,FunRender)
+assocLkp tightest infixes str = case M.lookup str infixes of
+  Nothing  ->  (tightest,Prefix)
+  Just ia  ->  ia
+\end{code}
+If a name is not in the domain of the map then 
+it is assumed to be a prefix function name.
+For now we have a global map, 
+but this may become a pretty-printing parameter at some future time.
+The following is the fixity list from Haskell 2010.
+\begin{verbatim}
+infixr 0  $  $! `seq`
+infixl 1  &  >>=  >>  >=>
+infixr 2  ||
+infixr 3  &&
+infix 4   ==  /=  <  >  <=  >=  `elem`  `notElem`
+infixl 4  <$  <$>  $>  <*  <*>  *>
+infixl 5  .|.  :  ++
+infixl 6  +  -
+infixl 7  *  /  `div`  `mod`  .&.
+infixr 8  **  ^  ^^
+infixr 9  .
+\end{verbatim}
+\begin{code}
+givenInfixes :: Infixes
+givenInfixes = M.fromList
+  [ ("or",(20,Infix))
+  , ("and",(30,Infix))
+  , ("not",(40,Unary))
+  , ("eq",(40,Binary))
+  , ("neq",(40,Binary))
+  , ("lt",(40,Binary))
+  , ("gt",(40,Binary))
+  , ("le",(40,Binary))
+  , ("ge",(40,Binary))
+  , ("add",(60,Infix))
+  , ("sub",(60,LInfix))
+  , ("mul",(70,Infix))
+  , ("dvd",(70,LInfix))
+  , ("div",(70,LInfix))
+  , ("mod",(70,LInfix))
+  , ("exp",(80,RInfix))
+  ]
+
+givenTightest :: Int
+givenTightest = maximum $ map fst $ M.elems givenInfixes
+
+funrender :: String -> (Int,FunRender)
+funrender = assocLkp givenTightest givenInfixes
+\end{code}
 
 \subsubsection{Expression Pretty-Printing}
 
@@ -137,17 +217,9 @@ the repetition of a single infix operator symbol)
 \begin{code}
 expr2SST (F f [])  =  SST (length f+2) (f++"()") []
 expr2SST (F f es)  --  f(e1,...,en)
-  = let
-      flen = length f
-      fname = SST flen f []
-      openpar = SST 1 "(" []
-      sep = SST 1 "," []
-      sepcount = length args - 1  
-      closepar = SST 1 ")" []
-      args = map expr2SST es
-      sstlist = intersperse sep args
-      lengthF = flen + 2 + sepcount + sum (map sstlen args)
-    in SST lengthF f ((openpar:sstlist)++[closepar])
+  = case funrender f of
+      fr@(_,Prefix)  ->  prefix2SST f es
+      _              ->  prefix2SST f es -- temporary
 \end{code}
 Our standard rendering of substitution
 produces the following forms
@@ -171,6 +243,23 @@ expr2SST (S e subs) -- e[e1,...,en/]
               + (sum $ map sstlen replist)  + (sum $ map sstlen tgtlist)
     in SST lengthS head 
          (eSSTs++[openSub]++replist++[sub]++tgtlist++[closeSub])
+\end{code}
+
+Handling function rendering cases:
+\begin{code}
+prefix2SST :: String -> [Expr] -> SST
+prefix2SST f es -- f(e1,...,en)
+  = let
+      flen = length f
+      fname = SST flen f []
+      openpar = SST 1 "(" []
+      sep = SST 1 "," []
+      sepcount = length args - 1  
+      closepar = SST 1 ")" []
+      args = map expr2SST es
+      sstlist = intersperse sep args
+      lengthF = flen + 2 + sepcount + sum (map sstlen args)
+    in SST lengthF f ((openpar:sstlist)++[closepar])
 \end{code}
 
 
