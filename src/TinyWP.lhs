@@ -10,7 +10,7 @@ module TinyWP (
 )
 where
 
-import Data.List(intercalate,nub)
+import Data.List(intercalate,nub,intersperse)
 
 iamtinywp :: String
 iamtinywp = "I am TinyWP!"
@@ -91,31 +91,90 @@ wp prog r = P "and" [r,X] -- need time to thinks this through
 \subsection{Pretty-Printing}
 
 We need to know sizes of text constructs and how things are logically nested.
-We adopt the following ``sized string-tree'' data-structure to record this.
+We adopt the following ``sized string-tree'' data-structure to record this,
+and some useful support functions.
 \begin{code}
 data SST -- Sized String-Tree
   = SST Int String [SST]
   deriving (Show,Read)
+
+
+v2SST :: String -> SST
+v2SST v = SST (length v) v []
+
+sstlen :: SST -> Int
+sstlen (SST len _ _)  =  len
+
+onelineSST :: SST -> String
+onelineSST (SST _ hdr ssts) = hdr ++ (concat $ map onelineSST ssts)
+
+checkSST :: SST -> Int
+checkSST sst@(SST len _ _) = len - length (onelineSST sst)
 \end{code}
 The code below defines a standard instrumented rendering of an object,
 assuming no width restrictions.
 
 \subsubsection{Expression Pretty-Printing}
 
-Our standard  rendering of an expression produces one of the following forms
-(here the $\oplus$ refer to a repetition of a single infix operator symbol)
-:
+Our standard rendering of atomic expressions produces one of the following forms
 \begin{mathpar}
   T \and F \and 42 \and v 
-  \and f(e_1,\dots,e_n) \and e_1 \oplus e_2 \oplus \dots \oplus e_n
 \end{mathpar}
 \begin{code}
 expr2SST :: Expr -> SST
-expr2SST(B b)     =  SST 1 (if b then "T" else "F") []
-expr2SST(I i)     =  SST (length s) s [] where s = show i
-expr2SST(V v)     =  SST (length v) v []
-expr2SST(F f [])  =  SST (length f+2) (f++"()") []
+expr2SST (B b)     =  SST 1 (if b then "T" else "F") []
+expr2SST (I i)     =  SST (length s) s [] where s = show i
+expr2SST (V v)     =  SST (length v) v []
 \end{code}
+Our standard rendering of an function application 
+produces one of the following forms
+(here the $\oplus$ refers to 
+the repetition of a single infix operator symbol)
+:
+\begin{mathpar}
+  f(e_1,\dots,e_n) \and e_1 \oplus e_2 \oplus \dots \oplus e_n
+\end{mathpar}
+\begin{code}
+expr2SST (F f [])  =  SST (length f+2) (f++"()") []
+expr2SST (F f es)  --  f(e1,...,en)
+  = let
+      flen = length f
+      fname = SST flen f []
+      openpar = SST 1 "(" []
+      sep = SST 1 "," []
+      sepcount = length args - 1  
+      closepar = SST 1 ")" []
+      args = map expr2SST es
+      sstlist = intersperse sep args
+      lengthF = flen + 2 + sepcount + sum (map sstlen args)
+    in SST lengthF f ((openpar:sstlist)++[closepar])
+\end{code}
+Our standard rendering of substitution
+produces the following forms
+\begin{mathpar}
+  e[e_1,...,e_n/x_1,...,x_n] \and e~\text{ if } n=0
+\end{mathpar}
+\begin{code}
+expr2SST (S e [])  =  expr2SST e
+expr2SST (S e subs) -- e[e1,...,en/]
+  = let
+      eSST@(SST sublen head eSSTs) = expr2SST e
+      openSub = SST 1 "[" []
+      sep = SST 1 "," []
+      sub = SST 1 "/" []
+      closeSub = SST 1 "]" []
+      (targets,replacements) = unzip subs
+      repSSTs = map expr2SST replacements
+      tgtlist = intersperse sep $ map v2SST targets
+      replist = intersperse sep repSSTs
+      lengthS = sublen + 3 
+              + (sum $ map sstlen replist)  + (sum $ map sstlen tgtlist)
+    in SST lengthS head 
+         (eSSTs++[openSub]++replist++[sub]++tgtlist++[closeSub])
+\end{code}
+
+
+\subsection*{DEPRECATED MATERIAL BELOW}
 
 With pretty-printers we have an object to render, 
 with a maximum width (\texttt{w}) we are allowed to use,
@@ -157,6 +216,7 @@ over multiple lines.
 
 \subsubsection{Syntax Pretty Printers}
 
+
 \begin{code}
 ppSub :: Int -> (Int -> t -> String) -> Subs t -> String
 ppSub w ppt sub 
@@ -177,6 +237,14 @@ ppE :: Int -> Expr -> SizedBox
 ppE _ (B b)  =  [(1,if b then "T" else "F")]
 ppE _ (I i)  =  [(length s,s)] where s = show i
 ppE _ (V v)  =  [(length v,v)]
+ppE _ (F f [])  =  [(length f+2,f++"()")]
+ppE w (F f es)
+  =  let
+       flen = length f
+       fbox = [(flen,f)]
+       esboxes = map (ppE w) es
+     in concat (fbox:esboxes)
+ppE w (S e sub) = [(19,"ppE w (S e sub) NYI")]
 
 ppFun :: Int -> String -> [Expr] -> String
 ppFun w f es  =  f ++ "("++intercalate "," (map (ppExpr w) es)++")"
