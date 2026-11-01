@@ -48,8 +48,24 @@ data Expr
   | F String [Expr]     -- function apply f(e1,e2,...,en)
   | S Expr (Subs Expr)  -- substitution e0[v1->e1,v2->e2,...,vn->en]
   deriving (Eq,Ord,Show,Read)
-\end{code}
 
+vnames@[u,v,x,y,z] = ["u","v","x","y","z"]
+[v_u,v_v,v_x,v_y,v_z] = map V vnames
+
+unumbered@[u1,u2,u3,u4,u5] = map ((u++) . show) [1..5]
+[v_u1,v_u2,v_u3,v_u4,v_u5] = map V unumbered
+
+[i1,i2,i3,i4,i5] = map I [1..5]
+[i10,i42,i99,i100,i1000] = map I [10,42,99,100,1000]
+
+fnames@[f,g,h] = ["f","g","h"]
+
+pqrs@[_P,_Q,_R,_S] = ["P","Q","R","S"]
+[vP,vQ,vR,vS] = map V pqrs
+
+exprBig = 
+  S v_x [(u1,i42),(u2,F f [i99]),(u3,S vQ [(y,i1000)])]
+\end{code}
 
 \subsubsection{Predicates}
 
