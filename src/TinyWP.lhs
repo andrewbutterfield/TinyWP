@@ -107,44 +107,15 @@ wp prog r = P "and" [r,X] -- need time to thinks this through
 \newpage
 \subsection{Pretty-Printing}
 
-We need to know sizes of text constructs and how things are logically nested.
-We adopt the following ``sized string-tree'' data-structure to record this,
-and some useful support functions.
-\begin{code}
-data SST -- Sized String-Tree
-  = SST Int String [SST]
-  deriving (Show,Read)
+We break this into two phases: 
+construct a tree-like data-structure that captures text fragments and sizing information,
+and then have a function that uses available width and sizing 
+to figure out how to display things nicely.
+
+\subsubsection{Tree Construction}
 
 
-v2SST :: String -> SST
-v2SST v = SST (length v) v []
-
-sstlen :: SST -> Int
-sstlen (SST len _ _)  =  len
-
-onelineSST :: SST -> String
-onelineSST (SST _ hdr ssts) = hdr ++ (concat $ map onelineSST ssts)
-
-checkSST :: SST -> Int
-checkSST sst@(SST len _ _) = len - length (onelineSST sst)
-
-examine :: SST -> IO () -- useful when using GHCi
-examine sst = putStrLn $ unlines 
-  [ ""
-  , "==="
-  , "Check: " ++ show (checkSST sst)
-  , "OneLine:"
-  , onelineSST sst
-  , "---"
-  , "Expr:"
-  , show sst
-  , "---"
-  ]
-\end{code}
-The code below defines a standard instrumented rendering of an object,
-assuming no width restrictions.
-
-We will also want to know if a function is usually rendered using infix notation.
+We will want to know if a function is usually rendered using infix notation.
 We provide a (partial) lookup table mapping function names to fixity information
 (precedence,associativity):
 \begin{code}
@@ -218,15 +189,51 @@ bigExpr  =  F "mul" [ F "add" [i42,i99]
                     -- should be  (42+99)*(i1*i2+i3*i4)
 \end{code}
 
-Some common pieces used for rendering:
+We need to know sizes of text constructs and how things are logically nested.
+We adopt the following ``sized string-tree'' data-structure to record this,
+and some useful support functions.
 \begin{code}
-comma     =  SST 1 "," []
-openpar   =  SST 1 "(" []      
-closepar  =  SST 1 ")" []
+data SST -- Sized String-Tree
+  = SST Int FunRender String [SST]
+  deriving (Show,Read)
+
+
+v2SST :: String -> SST
+v2SST v = SST (length v) Prefix v []
+
+sstlen :: SST -> Int
+sstlen (SST len _ _ _)  =  len
+
+onelineSST :: SST -> String
+onelineSST (SST _ _ hdr ssts) = hdr ++ (concat $ map onelineSST ssts)
+
+checkSST :: SST -> Int
+checkSST sst@(SST len _ _ _) = len - length (onelineSST sst)
+
+examine :: SST -> IO () -- useful when using GHCi
+examine sst = putStrLn $ unlines 
+  [ ""
+  , "==="
+  , "Check: " ++ show (checkSST sst)
+  , "OneLine:"
+  , onelineSST sst
+  , "---"
+  , "Expr:"
+  , show sst
+  , "---"
+  ]
 \end{code}
 
 
-\subsubsection{Expression Pretty-Printing}
+Some common pieces used for rendering:
+\begin{code}
+comma     =  SST 1 Prefix "," []
+openpar   =  SST 1 Prefix "(" []      
+closepar  =  SST 1 Prefix ")" []
+\end{code}
+
+
+\paragraph{Expression Pretty-Printing}
 
 We provide the expression pretty-printer with a precedence value,
 to support parenthesising infix expressions when they occur.
@@ -240,9 +247,9 @@ Our standard rendering of atomic expressions produces one of the following forms
   T \and F \and 42 \and v 
 \end{mathpar}
 \begin{code}
-expr2SST _ (B b)     =  SST 1 (if b then "T" else "F") []
-expr2SST _ (I i)     =  SST (length s) s [] where s = show i
-expr2SST _ (V v)     =  SST (length v) v []
+expr2SST _ (B b)     =  SST 1          Prefix (if b then "T" else "F") []
+expr2SST _ (I i)     =  SST (length s) Prefix s [] where s = show i
+expr2SST _ (V v)     =  SST (length v) Prefix v []
 \end{code}
 Our standard rendering of an function application 
 produces one of the following forms
@@ -253,7 +260,7 @@ the repetition of a single infix operator symbol)
   f(e_1,\dots,e_n) \and e_1 \oplus e_2 \oplus \dots \oplus e_n
 \end{mathpar}
 \begin{code}
-expr2SST _ (F f [])  =  SST (length f+2) (f++"()") []
+expr2SST _ (F f [])  =  SST (length f+2) Prefix (f++"()") []
 expr2SST outerp (F f es)  --  f(e1,...,en)
   = case funrender f of
       (_,Prefix)      ->  prefix2SST outerp f es
@@ -269,17 +276,17 @@ produces the following forms
 expr2SST outerp (S e [])  =  expr2SST outerp e
 expr2SST outerp (S e subs) -- e[e1,...,en/]
   = let
-      eSST@(SST sublen head eSSTs) = expr2SST outerp e
-      openSub = SST 1 "[" []
-      sub = SST 1 "/" []
-      closeSub = SST 1 "]" []
+      eSST@(SST sublen _ head eSSTs) = expr2SST outerp e
+      openSub  = SST 1 Prefix "[" []
+      sub      = SST 1 Prefix "/" []
+      closeSub = SST 1 Prefix "]" []
       (targets,replacements) = unzip subs
       repSSTs = map (expr2SST outerp) replacements
       tgtlist = intersperse comma $ map v2SST targets
       replist = intersperse comma repSSTs
       lengthS = sublen + 3 
               + (sum $ map sstlen replist)  + (sum $ map sstlen tgtlist)
-    in SST lengthS head 
+    in SST lengthS Prefix head 
          (eSSTs++[openSub]++replist++[sub]++tgtlist++[closeSub])
 \end{code}
 
@@ -290,12 +297,12 @@ prefix2SST :: Int -> String -> [Expr] -> SST
 prefix2SST outerp f es -- f(e1,...,en)
   = let
       flen = length f
-      fname = SST flen f []
+      fname = SST flen Prefix f []
       sepcount = length args - 1  
       args = map (expr2SST outerp) es
       sstlist = intersperse comma args
       lengthF = flen + 2 + sepcount + sum (map sstlen args)
-    in SST lengthF f ((openpar:sstlist)++[closepar])
+    in SST lengthF Prefix f ((openpar:sstlist)++[closepar])
 \end{code}
 
 Handling (associative) infix case
@@ -307,15 +314,15 @@ infix2SST op outerp innerp es -- e1 op e2 op ... op en
   = let
       sop = ' ':op++" "
       oplen = length op + 2
-      operator = SST oplen sop []
+      operator = SST oplen Infix sop []
       args = map (expr2SST innerp) es
       argcount = length args
       opcount = argcount - 1
       infixe = intersperse operator args
       lengthI = sum (map sstlen infixe)
     in if outerp < innerp 
-       then SST lengthI "" infixe 
-       else SST (lengthI+2) "(" (infixe++[closepar])
+       then SST lengthI     Infix "" infixe 
+       else SST (lengthI+2) Infix "(" (infixe++[closepar])
 \end{code}
 
 
@@ -359,7 +366,7 @@ which they can render.
 The available width \texttt{w} is used by heuristics to best split the output 
 over multiple lines.
 
-\subsubsection{Syntax Pretty Printers}
+\paragraph{Syntax Pretty Printers}
 
 
 \begin{code}
@@ -424,7 +431,5 @@ ppProgs w (v := e) = [ v ++ " := " ++ ppExpr w e ]
 ppProgs w (Cond e p q) = ppProgs w p ++ ["<| "++ppExpr w e++" |>"] ++ ppProgs w q
 ppProgs w (Loop e p) = [ppExpr w e ++ " *"] ++ ppProgs w p
 \end{code}
-
-
 
 
