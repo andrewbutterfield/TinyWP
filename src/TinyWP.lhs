@@ -63,7 +63,11 @@ fnames@[f,g,h] = ["f","g","h"]
 pqrs@[_P,_Q,_R,_S] = ["P","Q","R","S"]
 [vP,vQ,vR,vS] = map V pqrs
 
-bigFun = S v_x [(u1,i42),(u2,F f [i99]),(u3,S vQ [(y,i1000)])]
+bigExpr = S v_x [(u1,i42),(u2,F f [i99]),(u3,S vQ [(y,i1000)])]
+
+bigFun = F f [F g [i42,i99],F h [vP,vQ,vR]]
+
+bigVars = F f [V "abcdefg",V "gfedcba",V "hijklmno",V "pqrst"]
 \end{code}
 
 \subsubsection{Predicates}
@@ -107,14 +111,6 @@ wp prog r = P "and" [r,X] -- need time to thinks this through
 \newpage
 \subsection{Pretty-Printing}
 
-We break this into two phases: 
-construct a tree-like data-structure that captures text fragments and sizing information,
-and then have a function that uses available width and sizing 
-to figure out how to display things nicely.
-
-\subsubsection{Tree Construction}
-
-
 We will want to know if a function is usually rendered using infix notation.
 We provide a (partial) lookup table mapping function names to fixity information
 (precedence,associativity):
@@ -127,6 +123,7 @@ data FunRender
   | RInfix  -- Right Infix    e op f op g   is  op(e,op(f,g))
   | Infix   -- Fully Infix   e op f op g   is  op(e,f,g)
   deriving (Eq,Show,Read)
+
 type Infixes = Map String (Int,FunRender)
 
 assocLkp :: Int -> Infixes -> String -> (Int,FunRender)
@@ -174,156 +171,106 @@ givenInfixes = M.fromList
   ]
 
 -- extreme precedences
-loosep,tightp :: Int
-loosep  =  0     -- usual top-level precedence, no parentheses
-tightp  =  1000  -- forces parentheses at top-level
 
-givenTightest :: Int
-givenTightest = maximum $ map fst $ M.elems givenInfixes
+givenLoosest, givenTightest :: Int
+(givenLoosest,givenTightest)
+  = (minimum precs,maximum precs) 
+  where precs = map fst $ M.elems givenInfixes
+
+loosep,tightp :: Int
+loosep  =  0                   -- usual top-level precedence, no parentheses
+tightp  =  givenTightest + 10  -- forces parentheses at top-level
 
 funrender :: String -> (Int,FunRender)
 funrender = assocLkp givenTightest givenInfixes
 
-bigExpr  =  F "mul" [ F "add" [i42,i99]
-                    , F "add" [ F "mul" [i1,i2], F "mul" [i3,i4] ] ]
+bigArith  =  F "mul" [ F "add" [i42,i99]
+                     , F "add" [ F "mul" [i1,i2], F "mul" [i3,i4] ] ]
                     -- should be  (42+99)*(i1*i2+i3*i4)
 \end{code}
 
-We need to know sizes of text constructs and how things are logically nested.
-We adopt the following ``sized string-tree'' data-structure to record this,
-and some useful support functions.
+
+Next, the notion of indented sized sub-strings:
 \begin{code}
-data SST -- Sized String-Tree
-  = SST Int FunRender String [SST]
-  deriving (Show,Read)
+type Fragment = (Int,Int,String)
+ind :: Fragment -> Int    ; ind (i,_,_) = i
+len :: Fragment -> Int    ; len (_,l,_) = l
+txt :: Fragment -> String ; txt (_,_,t) = t
 
+indent :: Int -> Fragment -> Fragment 
+indent iplus (i,l,t)  =  (i+iplus,l,t)
 
-v2SST :: String -> SST
-v2SST v = SST (length v) Prefix v []
+mkFragment :: String -> Fragment 
+mkFragment str = (0,length str,str)
 
-sstlen :: SST -> Int
-sstlen (SST len _ _ _)  =  len
+fuseF :: Fragment -> Fragment -> Fragment
+fuseF (i1,l1,t1) (_,l2,t2) = (i1,l1+l2,t1++t2)
 
-onelineSST :: SST -> String
-onelineSST (SST _ _ hdr ssts) = hdr ++ (concat $ map onelineSST ssts)
+zeroF :: Fragment
+zeroF = (0,0,"")
 
-checkSST :: SST -> Int
-checkSST sst@(SST len _ _ _) = len - length (onelineSST sst)
+foldF :: [Fragment] -> Fragment
+foldF = foldr fuseF zeroF
 
-examine :: SST -> IO () -- useful when using GHCi
-examine sst = putStrLn $ unlines 
-  [ ""
-  , "==="
-  , "Check: " ++ show (checkSST sst)
-  , "OneLine:"
-  , onelineSST sst
-  , "---"
-  , "Expr:"
-  , show sst
-  , "---"
-  ]
+flattenF :: [Fragment] -> String
+flattenF = concat . map txt
+
+renderF :: Fragment -> String
+renderF (i,_,t) = replicate i ' ' ++ t
+
+renderFS :: [Fragment] -> String
+renderFS = unlines . map renderF
+
+putFrags :: [Fragment] -> IO ()
+putFrags = putStrLn . renderFS
+
+sizeF :: [Fragment] -> Int
+sizeF = length . flattenF
+
+-- some useful fragments
+[lpar,rpar,comma] = map mkFragment ["(",")",","]
 \end{code}
 
-
-Some common pieces used for rendering:
+Now, the pretty printer:
 \begin{code}
-comma     =  SST 1 Prefix "," []
-openpar   =  SST 1 Prefix "(" []      
-closepar  =  SST 1 Prefix ")" []
-\end{code}
-
-
-\paragraph{Expression Pretty-Printing}
-
-We provide the expression pretty-printer with a precedence value,
-to support parenthesising infix expressions when they occur.
-\begin{code}
-expr2sst = expr2SST loosep
-expr2SST :: Int -> Expr -> SST
-\end{code}
-
-Our standard rendering of atomic expressions produces one of the following forms
-\begin{mathpar}
-  T \and F \and 42 \and v 
-\end{mathpar}
-\begin{code}
-expr2SST _ (B b)     =  SST 1          Prefix (if b then "T" else "F") []
-expr2SST _ (I i)     =  SST (length s) Prefix s [] where s = show i
-expr2SST _ (V v)     =  SST (length v) Prefix v []
-\end{code}
-Our standard rendering of an function application 
-produces one of the following forms
-(here the $\oplus$ refers to 
-the repetition of a single infix operator symbol)
-:
-\begin{mathpar}
-  f(e_1,\dots,e_n) \and e_1 \oplus e_2 \oplus \dots \oplus e_n
-\end{mathpar}
-\begin{code}
-expr2SST _ (F f [])  =  SST (length f+2) Prefix (f++"()") []
-expr2SST outerp (F f es)  --  f(e1,...,en)
+ppExpr :: Int -> Expr -> [Fragment]  -- indent,length,string
+ppExpr _ (B b)  =  [(0,1,if b then "T" else "F")]
+ppExpr _ (I i)  =  [(0,length s,s)] where s = show i
+ppExpr _ (V x)  =  [(0,length x,x)]
+ppExpr w (F f es)
   = case funrender f of
-      (_,Prefix)      ->  prefix2SST outerp f es
-      (innerp,Infix)  ->  infix2SST f outerp innerp es
-      _               ->  prefix2SST outerp f es -- temporary
+      _ -> ppPrefix w f es
+ppExpr w (S e sub)  = [(0,14,"(ppExpr S NYI)")]
 \end{code}
-Our standard rendering of substitution
-produces the following forms
-\begin{mathpar}
-  e[e_1,...,e_n/x_1,...,x_n] \and e~\text{ if } n=0
-\end{mathpar}
+
+With \texttt{Prefix} we render as $f(e_1,\dots,e_2)$.
 \begin{code}
-expr2SST outerp (S e [])  =  expr2SST outerp e
-expr2SST outerp (S e subs) -- e[e1,...,en/]
-  = let
-      eSST@(SST sublen _ head eSSTs) = expr2SST outerp e
-      openSub  = SST 1 Prefix "[" []
-      sub      = SST 1 Prefix "/" []
-      closeSub = SST 1 Prefix "]" []
-      (targets,replacements) = unzip subs
-      repSSTs = map (expr2SST outerp) replacements
-      tgtlist = intersperse comma $ map v2SST targets
-      replist = intersperse comma repSSTs
-      lengthS = sublen + 3 
-              + (sum $ map sstlen replist)  + (sum $ map sstlen tgtlist)
-    in SST lengthS Prefix head 
-         (eSSTs++[openSub]++replist++[sub]++tgtlist++[closeSub])
+ppPrefix :: Int -> String -> [Expr] -> [Fragment]
+ppPrefix w f es 
+  | w == 0 || size <= w  
+    =  fname:lpar:intersperse comma (concat fargs) ++ [rpar]
+  | flen <= w && allargs+sepcount <= w
+    = [foldF [fname,lpar]] 
+      ++ [foldF (map (indent 2 ) ((intersperse comma) (concat fargs)))]
+      ++ [rpar]
+  | otherwise  
+    =  [foldF [fname,lpar]]
+       ++ [(8,13,"ppPrefix-NYFi")]
+       ++ [rpar]
+  where
+    flen    =  length f
+    fname   =  (0,flen,f)
+    fargs   =  map (ppExpr 0) es
+    asizes  =  map len $ concat fargs
+    sepcount = max 0 (length fargs - 1)
+    size = flen + 2 + sum asizes + sepcount
+    argsizes = map sizeF fargs
+    sizes = (flen,argsizes)
+    allargs = sum argsizes
 \end{code}
 
 
-Handling function rendering cases
-\begin{code}
-prefix2SST :: Int -> String -> [Expr] -> SST
-prefix2SST outerp f es -- f(e1,...,en)
-  = let
-      flen = length f
-      fname = SST flen Prefix f []
-      sepcount = length args - 1  
-      args = map (expr2SST outerp) es
-      sstlist = intersperse comma args
-      lengthF = flen + 2 + sepcount + sum (map sstlen args)
-    in SST lengthF Prefix f ((openpar:sstlist)++[closepar])
-\end{code}
 
-Handling (associative) infix case
-\begin{code}
-infix2SST :: String -> Int -> Int -> [Expr] -> SST
-infix2SST op outerp innerp es -- e1 op e2 op ... op en
-  -- if outerp < innerp  we render as  e1 op e2 op ... op en
-  -- if outerp >= innerp  we render as (e1 op e2 op ... op en)
-  = let
-      sop = ' ':op++" "
-      oplen = length op + 2
-      operator = SST oplen Infix sop []
-      args = map (expr2SST innerp) es
-      argcount = length args
-      opcount = argcount - 1
-      infixe = intersperse operator args
-      lengthI = sum (map sstlen infixe)
-    in if outerp < innerp 
-       then SST lengthI     Infix "" infixe 
-       else SST (lengthI+2) Infix "(" (infixe++[closepar])
-\end{code}
 
 
 \subsection*{DEPRECATED MATERIAL BELOW}
@@ -377,13 +324,13 @@ ppSub w ppt sub
            ++ "/"
            ++ intercalate "," (map (ppt w) ts) ++ "]"
 
-ppExpr :: Int -> Expr -> String
--- ppExpr w (B b)      =  if b then "T" else "F"
--- ppExpr w (I i)      =  show i
--- ppExpr w (V v)      =  v
-ppExpr w (F f es)   =  ppFun w f es
-ppExpr w (S e sub)  =  ppExpr w e ++ ppSub w ppExpr sub
-ppExpr w expr = renderBox $ map snd $ ppE w expr
+xxExpr :: Int -> Expr -> String
+-- xxExpr w (B b)      =  if b then "T" else "F"
+-- xxExpr w (I i)      =  show i
+-- xxExpr w (V v)      =  v
+xxExpr w (F f es)   =  ppFun w f es
+xxExpr w (S e sub)  =  xxExpr w e ++ ppSub w xxExpr sub
+xxExpr w expr = renderBox $ map snd $ ppE w expr
 
 ppE :: Int -> Expr -> SizedBox
 ppE _ (B b)  =  [(1,if b then "T" else "F")]
@@ -399,7 +346,7 @@ ppE w (F f es)
 ppE w (S e sub) = [(19,"ppE w (S e sub) NYI")]
 
 ppFun :: Int -> String -> [Expr] -> String
-ppFun w f es  =  f ++ "("++intercalate "," (map (ppExpr w) es)++")"
+ppFun w f es  =  f ++ "("++intercalate "," (map (xxExpr w) es)++")"
 
 ppPred :: Int -> Pred -> String
 ppPred w = reverse . strip . reverse . unlines . ppPreds w
@@ -407,7 +354,7 @@ ppPred w = reverse . strip . reverse . unlines . ppPreds w
 ppPreds :: Int -> Pred -> [String]
 ppPreds w T     = ["T"]
 ppPreds w X     = ["F"]
-ppPreds w (A e) = [ppExpr w e]
+ppPreds w (A e) = [xxExpr w e]
 ppPreds w (P p ps) = ppProp w p ps
 ppPreds w (Q q x p) = [q++" "++x++" @ " ++ ppPred w p]
 ppPreds w (R p sub) = [ppPred w p, ppSub w ppPred sub] 
@@ -427,9 +374,9 @@ ppProgs :: Int -> Prog -> [String]
 ppProgs w U = ["U"]
 ppProgs w II = ["II"]
 ppProgs w (p ::: q) = ppProgs w p ++ [";"] ++ ppProgs w q
-ppProgs w (v := e) = [ v ++ " := " ++ ppExpr w e ]
-ppProgs w (Cond e p q) = ppProgs w p ++ ["<| "++ppExpr w e++" |>"] ++ ppProgs w q
-ppProgs w (Loop e p) = [ppExpr w e ++ " *"] ++ ppProgs w p
+ppProgs w (v := e) = [ v ++ " := " ++ xxExpr w e ]
+ppProgs w (Cond e p q) = ppProgs w p ++ ["<| "++xxExpr w e++" |>"] ++ ppProgs w q
+ppProgs w (Loop e p) = [xxExpr w e ++ " *"] ++ ppProgs w p
 \end{code}
 
 
